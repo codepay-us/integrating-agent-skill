@@ -48,28 +48,28 @@ code you will actually write:
 If you have no network access, say so explicitly and proceed on the snapshot — but
 flag every wire detail as unverified. Never silently rely on the cache as if current.
 
-## ⚠️ Required-credential gate — `app_id` (confirm it BEFORE proceeding)
+## ⚠️ Required-credential gate — prompt for `app_id` FIRST (BLOCKING)
 
-`app_id` is **mandatory** in every ECR Hub and Cloud message — it identifies the
-**sending POS application**, so CodePay issues it **once per POS app / integrator at
-onboarding** (shared across all of that app's merchants), **NOT per merchant**. Without
-the **real, registered** `app_id`, **nothing works: you cannot send a single
-transaction or test anything.**
+`app_id` is **mandatory** in every ECR Hub / Cloud message. Placeholder code compiles
+and the app runs — but **every payment fails at runtime** until a *real* `app_id` is in
+place (CodePay rejects it, e.g. `response_code 106` / `M009 Invalid application invoke`).
+This is the #1 cause of *"the code is done but payments don't work."*
 
-So before designing settings or writing any transport code, **confirm the real `app_id`
-with the user** and do not proceed until you have it:
+**Before writing any transport code, explicitly prompt the user and wait for the value:**
 
-> "What is your CodePay `app_id` (from your CodePay onboarding / Paypilot dashboard)?
-> (Cloud topology also needs `merchant_no` + the RSA2 key setup.)"
+> "Before I wire this up — what is your CodePay `app_id`? (from your CodePay onboarding /
+> Paypilot dashboard.) I need the **real** value or the terminal rejects every
+> transaction. For the Cloud topology I also need `merchant_no` + the RSA2 keys."
 
-Rules:
-- **Never guess or ship a `<your_app_id>` placeholder.** Treat an empty/placeholder
-  value as a **blocking error** in the payment flow, not a silent default. If the user
-  doesn't have a real one yet, tell them to obtain it from CodePay first.
-- Because it's app-level, a **build-time constant is the normal, correct shape** — but
-  it must be the **real registered value**, and keep it **switchable per environment
-  (sandbox vs production)**. Do NOT build a per-merchant input dialog for it unless the
-  user's CodePay account actually issues `app_id` per merchant (rare — confirm first).
+Then bake that real value into the config. **Do not proceed past this gate without it.**
+
+- **Never proceed on a `<your_app_id>` placeholder** or invent one.
+- CodePay's `app_id` is **app-level (per-integrator)** — one value issued per POS app at
+  onboarding, shared across all merchants. So it is normally **one configured constant**
+  (keep it sandbox/production-switchable), **not** a per-merchant runtime input field.
+  Asking the *developer* once for the real value (above) is still **required**; building
+  a per-merchant input UI is not — unless the user's CodePay account actually issues
+  `app_id` per merchant (rare; confirm first).
 
 ## Step 1 — Pick the integration topology (do this before any code)
 
