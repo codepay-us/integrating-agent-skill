@@ -161,6 +161,7 @@ doc/SDK links: **`codepay-protocol-reference.md`**.
 | Only terminal-prompt tips | Bars/sit-down need post-auth `tip.adjustment`; cashiers need POS-entered. |
 | Routing the terminal call through the data/web-server layer | It's device I/O — place it with other device integrations; persist the *result* normally. |
 | Storing full PAN | Store masked last4 + brand only. Never PAN/track/CVV. |
+| Topology-B WebSocket hangs forever on iOS/macOS | The terminal's WS server returns a non-standard `101 Web Socket Protocol Handshake` reason phrase; Apple's `URLSessionWebSocketTask` rejects it silently. Hand-roll RFC-6455 over `NWConnection` (or use a lenient lib). See reference. |
 
 ## Red flags — STOP
 

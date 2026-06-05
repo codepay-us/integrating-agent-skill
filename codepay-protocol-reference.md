@@ -214,6 +214,25 @@ Verified against live `local-communication` docs (2026-06-04):
   `{topic, request_id, app_id, timestamp, version, biz_data}`; match the response by
   `request_id`.
 
+> **⚠️ Non-standard `101` handshake — silently breaks strict WebSocket clients
+> (verified on real hardware 2026-06-04).** The terminal's WS server is
+> **TooTallNate Java-WebSocket**, which replies with
+> `HTTP/1.1 101 Web Socket Protocol Handshake` — status code `101` is correct, but the
+> **reason phrase is `Web Socket Protocol Handshake`, NOT the RFC-6455 standard
+> `Switching Protocols`.** Lenient clients (curl, the Android SDK, Dart `dart:io`, most
+> Node/Go libs) ignore the reason phrase and connect fine. **Strict clients reject it —
+> most notably Apple's `URLSessionWebSocketTask` (iOS/macOS), which gives no error and
+> hangs forever** waiting for `Switching Protocols`.
+> **Fix (Apple platforms / any strict client):** do NOT use `URLSessionWebSocketTask`.
+> Hand-roll a minimal RFC-6455 client over a raw TCP socket — Swift: `NWConnection`
+> (Network.framework) — that accepts *any* `101` and does its own frame masking; no
+> third-party dependency. (A lenient third-party lib such as Starscream also works.)
+> Flutter's `web_socket_channel` on iOS uses `dart:io` and is usually fine; native
+> Swift/Apple-URLSession clients are the ones that get bitten. Diagnose with
+> `curl -i -N --http1.1 -H "Connection: Upgrade" -H "Upgrade: websocket"
+> -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=="
+> http://<ip>:35779/` and read the status line.
+
 **Two SDK generations exist — current docs use `ECRHubClient`; older GitHub README uses
 `EcrClient`.** Current shape (live docs):
 
