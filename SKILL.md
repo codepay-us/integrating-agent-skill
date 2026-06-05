@@ -14,7 +14,7 @@ processor and returns a result. The POS never touches card data.
 **Core principle — do not invent the wire contract.** The single biggest failure
 when integrating CodePay is reconstructing a "reasonable" REST API (`/v1/transactions`,
 `amount_cents`, bearer tokens…). CodePay does **not** work that way. The real
-protocol — `topic` / `biz_data` envelopes, `ecrhub.pay.order`, `response_code "000"`,
+protocol — `topic` / `biz_data` envelopes, `ecrhub.pay.order`, `response_code "000"`/`"0"`,
 `trans_type` 1/2/3, decimal-string amounts — **cannot be guessed**. The facts you
 need live in **`codepay-protocol-reference.md`** (next to this file) — but treat it
 as a possibly-stale cache and **refresh from the live source first (Step 0)**, since
@@ -120,8 +120,9 @@ template dropped into a new folder.
 ## Step 3 — Implement the flow correctly
 
 - **Sale** (`trans_type=1`): block on a "follow prompts on terminal" state; record the
-  payment ONLY on confirmed `response_code "000"`; decline → show error, record
-  nothing.
+  payment ONLY on a confirmed success code — **`"000"` (on-terminal Intent) or `"0"`
+  (LAN WebSocket); accept both** or LAN reads an approved sale as a decline; decline →
+  show error, record nothing.
 - **Void** (`trans_type=2`, `orig_merchant_order_no`): reverse a same-day,
   pre-settlement card payment. **Refund** (`trans_type=3`): for settled orders.
 - **Tip**: support all three models (terminal-screen / POS-entered / post-auth
@@ -141,7 +142,7 @@ template dropped into a new folder.
 | Close terminal screen | `ecrhub.pay.close` |
 | Settlement | `ecrhub.pay.batch.close` |
 | Tip adjust | `ecrhub.pay.tip.adjustment` |
-| Success (ECR Hub) | `response_code == "000"` |
+| Success (ECR Hub) | `response_code` `"000"` (Intent) **or** `"0"` (LAN WebSocket) — accept both |
 | Success (Cloud) | `code == "0"` |
 | Amount on wire | decimal string `"2.15"`, NOT cents |
 | On-terminal Intent | `com.codepay.transaction.call` |
@@ -157,6 +158,9 @@ doc/SDK links: **`codepay-protocol-reference.md`**.
 | Putting integer cents on the wire | `order_amount` is a decimal string in major units. |
 | Hand-rolling lookup-by-idempotency-key recovery | Use CodePay's native `request_id` + `ecrhub.pay.query` keyed by `merchant_order_no`. |
 | Treating "no response" as "not charged" | It's UNKNOWN. Query before deciding; auto-void only unknown sales. |
+| Querying (recovery) on every failed sale | Recover ONLY on a genuine UNKNOWN: the request threw (timeout/lost response) OR a non-success `response_msg` mentions a timeout. Real declines (insufficient funds, M009) never query. |
+| Spawning a 2nd overlay for the recovery query — OR dropping the overlay before it | Keep ONE "follow prompts" overlay up across sale → recovery → final result; dismiss only at the end. A second popup confuses; dropping it lets the cashier touch the POS while the money state is unresolved. Keep sale and recovery as separate calls, both under the one overlay. |
+| `jsonDecode`-ing the `biz_data` extra blindly | A cancel (and other responses) return `biz_data` as an EMPTY string; `jsonDecode("")` throws → caught upstream as `unknown` → an unwanted query. Guard empty/malformed → empty map. (On-terminal cancel = `RESULT_OK` + `response_code "110"` "Manual cancelation", empty biz_data — read as a clean decline.) |
 | Modeling only one deployment | If both on-terminal and external are needed, the transport must be pluggable from day one. |
 | Only terminal-prompt tips | Bars/sit-down need post-auth `tip.adjustment`; cashiers need POS-entered. |
 | Routing the terminal call through the data/web-server layer | It's device I/O — place it with other device integrations; persist the *result* normally. |
@@ -171,6 +175,6 @@ doc/SDK links: **`codepay-protocol-reference.md`**.
 - "I'll just isolate the guessed contract and fix it later" → the contract is
   knowable now; get it right now.
 - No `merchant_order_no` persisted before the send, or no query-based recovery path.
-- Recording a card payment before a confirmed `"000"`.
+- Recording a card payment before a confirmed success code (`"000"` on Intent / `"0"` on LAN).
 - Designing settings or writing transport code without first asking the user for a real
   `app_id` — a `<your_app_id>` placeholder is NOT enough; it can't transact.

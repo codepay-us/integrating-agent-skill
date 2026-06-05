@@ -1,6 +1,6 @@
 # CodePay / ECR Hub Protocol Reference
 
-> **SNAPSHOT taken 2026-06-04 — may be stale.** CodePay updates its docs/SDKs.
+> **SNAPSHOT — last reconciled 2026-06-05 (may be stale).** CodePay updates its docs/SDKs.
 > Per SKILL.md **Step 0**, WebFetch the live docs + the official SDK and reconcile
 > BEFORE trusting any value here for code you write. If a live value differs, the
 > live value wins — then update this file. Live docs/SDK links are at the bottom.
@@ -15,7 +15,7 @@ contract get it wrong.** The live docs/SDK are the source of truth.
 
 | Family | Used for | Success code | Auth | Transport |
 |---|---|---|---|---|
-| **ECR Hub** | On-terminal app + external POS talking to a terminal **locally** | `response_code == "000"` | none / device pairing | Android Intent · LAN WebSocket · USB · Serial |
+| **ECR Hub** | On-terminal app + external POS talking to a terminal **locally** | `response_code` `"000"` (Intent) **or** `"0"` (LAN) — accept both | none / device pairing | Android Intent · LAN WebSocket · USB · Serial |
 | **Cloud Gateway** (`wisehub.cloud.*`) | POS talking to the terminal **through CodePay's cloud** | `code == "0"` | **RSA2 signature** | HTTPS REST + MQTT push |
 
 Most counter/restaurant POS work uses **ECR Hub** (terminal is on the same counter
@@ -99,19 +99,27 @@ exact enum for your processor/region in the docs or SDK before relying on them.*
 
 ## biz_data / response — result fields
 
-Response envelope carries `response_code` (`"000"` = success; anything else =
-failure) and `response_msg` (error description). Transaction result fields:
+Response envelope carries `response_code` and `response_msg` (error description).
+
+> **⚠️ SUCCESS CODE DIFFERS BY TRANSPORT (verified on real hardware 2026-06-05):
+> on-terminal Intent (topology A) returns `response_code "000"`; LAN WebSocket
+> (topology B) returns `response_code "0"`.** Treat BOTH `"000"` and `"0"` as
+> success, or the LAN path wrongly reads an approved sale as a decline (terminal
+> shows success, POS shows an error). Anything else = decline.
+
+Transaction result fields:
 
 | Field | Meaning |
 |---|---|
 | `trans_no` | CodePay's transaction number |
-| `trans_status` | terminal status (approved / voided / refunded — verify exact strings) |
+| `trans_status` | terminal status (approved / voided / refunded — verify exact strings; the LAN demo returned `"2"` for an approved sale) |
 | `trans_type` | echoes 1/2/3 |
-| `order_amount` / `tip_amount` / `total_amount` | decimal strings |
-| `card_no` | **masked** PAN (last 4 only — never full PAN) |
-| `card_brand` / `card_type` | Visa / Mastercard / … |
+| `order_amount` / `tip_amount` / `total_amount` | decimal strings (LAN may omit `total_amount`/`tip_amount`) |
+| `card_no` | **masked** PAN (last 4 only — never full PAN), e.g. `456331******3919` |
+| `card_brand` / `card_type` | Visa / Mastercard / … — **but the LAN WebSocket reports the brand as `pay_method_id` (e.g. `"Visa"`), not `card_brand`.** Accept either. |
 | `auth_code` | issuer authorization code (print on receipt) |
 | `ref_no` | reference number for reconciliation |
+| `signature_url` | (LAN) URL to the captured signature image — do NOT log it in prod |
 | `trans_end_time` | completion time |
 
 Cloud Gateway responses use `code == "0"` for success and wrap the result in a
@@ -132,9 +140,65 @@ CodePay's native mechanism:
    by `request_id`) so the terminal holds the result until the POS acknowledges.
 3. On timeout / lost response, send **`ecrhub.pay.query`** keyed by
    `merchant_order_no` to learn the true final state, then record accordingly.
-4. Only record the payment in your POS after a confirmed `"000"`. A **decline** is a
-   clean "no money moved" — do NOT void it. Only a genuinely **unknown** state
+4. Only record the payment in your POS after a confirmed `"000"`/`"0"`. A **decline**
+   is a clean "no money moved" — do NOT void it. Only a genuinely **unknown** state
    warrants an auto-reversal (void) before giving up.
+
+### When to recover — be precise (don't query on every failure)
+
+The `ecrhub.pay.query` recovery is a fallback for a genuinely **UNKNOWN** state,
+NOT for ordinary declines. Trigger it ONLY when:
+
+- the request **threw** (no response at all): timeout, socket/connection loss,
+  parse failure — i.e. you never learned the result; **or**
+- the terminal **returned a non-success response whose `response_msg` mentions a
+  timeout** (e.g. "Transaction timeout"). Map that to `unknown`, not a clean
+  decline — the money state is genuinely uncertain.
+
+Do **NOT** query on a real decline (insufficient funds, "Invalid application
+invoke", etc.): the terminal told you no money moved. Querying those just adds
+load and a confusing second prompt.
+
+**A user CANCEL is a decline, not an unknown — keep both transports consistent.**
+On the LAN WebSocket path a cancel comes back as a normal non-success response
+(→ decline, no query). On-terminal Intent, **VERIFIED on real hardware
+(2026-06-05): a cancel comes back as `RESULT_OK` (resultCode `-1`, NOT
+`RESULT_CANCELED`) with `response_code "110"` / `response_msg "Transaction
+failed[[K026]Manual cancelation by operator]"` and an EMPTY `biz_data`.** So a
+cancel is just a non-success result — read `"110"` as a clean decline. Two
+native-side pitfalls that both turn this cancel into a false `unknown` →
+unwanted query:
+
+- ⚠️ **Never `jsonDecode` the `biz_data` extra blindly.** A cancel (and other
+  responses) return `biz_data` as an **empty string**; `jsonDecode("")` throws
+  `FormatException` → caught upstream as `unknown` → query. Guard: empty /
+  malformed `biz_data` → empty map, never throw. (General bug, not cancel-only.)
+- For any non-`RESULT_OK` resultCode (e.g. an early `RESULT_CANCELED` before the
+  card flow starts), have the native shim return a forced non-success result map
+  (`response_msg` "Cancelled"), **NOT** `result.error(...)` — an error becomes a
+  Dart `PlatformException` → `unknown` → query.
+
+(A genuine no-response — the Intent never returns at all — still times out →
+`unknown` → query, which is correct.)
+
+### One continuous overlay until the FINAL result (UX)
+
+Show ONE blocking "follow the prompts on the terminal" overlay and keep it up for
+the **whole** transaction — the sale AND (when the sale is `unknown`) the
+recovery query — dismissing it only once the FINAL, post-recovery result is
+known. Two rules that sound contradictory but aren't:
+
+- **Don't spawn a SECOND/separate overlay** (or loading window) for the recovery
+  query — the cashier must never see the prompt pop up twice.
+- **Don't drop the overlay before the query either** — leaving the POS
+  interactive mid-transaction lets the cashier tap other things while the money
+  state is still unresolved.
+
+So: **reuse the same overlay** across sale → recovery → final result. Keep the
+sale and the recovery as **separate** calls (so recovery fires only on a genuine
+`unknown`, per the trigger rules above), but run **both under that one overlay**;
+show the resolved result only after it closes (approved → record + receipt;
+declined → message; still-unknown → "could not confirm, check the terminal").
 
 Reconcile/settle with `ecrhub.pay.batch.close` at end-of-day / shift close.
 
