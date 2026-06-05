@@ -256,9 +256,30 @@ client.cancelTransaction(/* topic = CLOSE_TOPIC */)
 ```java
 Intent i = new Intent("com.codepay.transaction.call");
 i.putExtra("version", "2.0");
-i.putExtra("appId", appId);
+i.putExtra("app_id", appId);   // ⚠️ snake_case "app_id" — NOT "appId" (see below)
 i.putExtra("topic", "ecrhub.pay.order");
 i.putExtra("biz_data", bizDataJsonString);   // {"trans_type":"1","order_amount":"2.15",...}
 startActivityForResult(i, REQ_PAY);
 // onActivityResult: data.getStringExtra("response_code"/"response_msg"/"biz_data")
 ```
+
+> **⚠️ VERIFIED ON REAL HARDWARE (2026-06-05): the app-id Intent extra key is
+> `app_id` (snake_case), NOT `appId`.** The official developer docs
+> (`integrate-with-codepay-terminal`) say `putExtra("appId", ...)` — that is
+> WRONG. With `appId` the terminal can't find the app id and rejects the
+> transaction with **`response_code` 106 / `response_msg` "Transaction
+> failed[[M009]Invalid application invoke]"** — even with a valid, registered
+> app id. Switching the extra key to `app_id` fixes it. It is consistent with
+> the ECR Hub envelope, whose fields are all snake_case (`version`, `topic`,
+> `biz_data`, `app_id`). The Intent action (`com.codepay.transaction.call`) and
+> the result extras (`response_code` / `response_msg` / `biz_data`) ARE correct
+> as documented.
+>
+> **M009 "Invalid application invoke" troubleshooting** (real-world): it means
+> the terminal won't let the *calling app* invoke a transaction. Check, in
+> order: (1) wrong app-id extra key (`appId` vs `app_id`, above — this was the
+> actual cause once); (2) app id not registered / not bound to the terminal's
+> merchant; (3) the calling app's package + signing certificate not authorized
+> in PayPilot (debug-signed builds may be rejected — try a release build).
+> CodePay does not publicly document M009 — confirm app-authorization rules with
+> CodePay support (support@codepay.us).
