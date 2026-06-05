@@ -51,26 +51,25 @@ flag every wire detail as unverified. Never silently rely on the cache as if cur
 ## ⚠️ Required-credential gate — `app_id` (confirm it BEFORE proceeding)
 
 `app_id` is **mandatory** in every ECR Hub and Cloud message — it identifies the
-sending POS application. Without the **real, registered** `app_id` (issued by CodePay
-onboarding / the Paypilot dashboard), **nothing works: you cannot send a single
+**sending POS application**, so CodePay issues it **once per POS app / integrator at
+onboarding** (shared across all of that app's merchants), **NOT per merchant**. Without
+the **real, registered** `app_id`, **nothing works: you cannot send a single
 transaction or test anything.**
 
-So before designing settings or writing any transport code, **STOP and confirm the real
-`app_id` with the user**:
+So before designing settings or writing any transport code, **confirm the real `app_id`
+with the user** and do not proceed until you have it:
 
 > "What is your CodePay `app_id` (from your CodePay onboarding / Paypilot dashboard)?
-> Is it issued once for the whole POS product, or one per merchant? For the Cloud
-> topology I'll also need `merchant_no` + the RSA2 key setup."
+> (Cloud topology also needs `merchant_no` + the RSA2 key setup.)"
 
-**Do not proceed past this gate until you have a real value.** Rules:
-- **Never guess or use a `<your_app_id>` placeholder** and move on. If the user doesn't
-  have one yet, tell them to obtain it from CodePay first.
-- **If `app_id` is per-merchant**, source it from the project's settings/config per install.
-- **If `app_id` is one value for the whole POS product** (CodePay often issues it per
-  integrator/app, not per merchant), a build-time constant is acceptable — but make it
-  the **real registered value**, keep it **configurable per environment (sandbox vs
-  production)**, and treat an empty/placeholder value as a blocking error, not a silent
-  default. Confirm which model your CodePay account uses before assuming.
+Rules:
+- **Never guess or ship a `<your_app_id>` placeholder.** Treat an empty/placeholder
+  value as a **blocking error** in the payment flow, not a silent default. If the user
+  doesn't have a real one yet, tell them to obtain it from CodePay first.
+- Because it's app-level, a **build-time constant is the normal, correct shape** — but
+  it must be the **real registered value**, and keep it **switchable per environment
+  (sandbox vs production)**. Do NOT build a per-merchant input dialog for it unless the
+  user's CodePay account actually issues `app_id` per merchant (rare — confirm first).
 
 ## Step 1 — Pick the integration topology (do this before any code)
 

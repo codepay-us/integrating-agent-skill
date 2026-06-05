@@ -56,7 +56,7 @@ Every request and response is one JSON object:
 |---|---|---|
 | `topic` | M | which operation (table below) |
 | `request_id` | C | **unique per request; required for terminal confirmation mode.** This is the idempotency / recovery anchor. |
-| `app_id` | M | your payment app id (from CodePay onboarding) |
+| `app_id` | M | identifies the sending POS app — issued **once per POS app / integrator** at CodePay onboarding (shared across that app's merchants), **not per-merchant**. Normally a configured/build-time constant; must be the real registered value (never a placeholder). |
 | `timestamp` | O | epoch millis as string (live `api-structure` marks it Optional; SDKs still set it) |
 | `version` | O | protocol version, e.g. `"2.0"` |
 | `biz_data` | M | the transaction payload |
