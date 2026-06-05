@@ -48,6 +48,30 @@ code you will actually write:
 If you have no network access, say so explicitly and proceed on the snapshot — but
 flag every wire detail as unverified. Never silently rely on the cache as if current.
 
+## ⚠️ Required-credential gate — `app_id` (confirm it BEFORE proceeding)
+
+`app_id` is **mandatory** in every ECR Hub and Cloud message — it identifies the
+sending POS application. Without the **real, registered** `app_id` (issued by CodePay
+onboarding / the Paypilot dashboard), **nothing works: you cannot send a single
+transaction or test anything.**
+
+So before designing settings or writing any transport code, **STOP and confirm the real
+`app_id` with the user**:
+
+> "What is your CodePay `app_id` (from your CodePay onboarding / Paypilot dashboard)?
+> Is it issued once for the whole POS product, or one per merchant? For the Cloud
+> topology I'll also need `merchant_no` + the RSA2 key setup."
+
+**Do not proceed past this gate until you have a real value.** Rules:
+- **Never guess or use a `<your_app_id>` placeholder** and move on. If the user doesn't
+  have one yet, tell them to obtain it from CodePay first.
+- **If `app_id` is per-merchant**, source it from the project's settings/config per install.
+- **If `app_id` is one value for the whole POS product** (CodePay often issues it per
+  integrator/app, not per merchant), a build-time constant is acceptable — but make it
+  the **real registered value**, keep it **configurable per environment (sandbox vs
+  production)**, and treat an empty/placeholder value as a blocking error, not a silent
+  default. Confirm which model your CodePay account uses before assuming.
+
 ## Step 1 — Pick the integration topology (do this before any code)
 
 ```dot
@@ -148,3 +172,5 @@ doc/SDK links: **`codepay-protocol-reference.md`**.
   knowable now; get it right now.
 - No `merchant_order_no` persisted before the send, or no query-based recovery path.
 - Recording a card payment before a confirmed `"000"`.
+- Designing settings or writing transport code without first asking the user for a real
+  `app_id` — a `<your_app_id>` placeholder is NOT enough; it can't transact.
