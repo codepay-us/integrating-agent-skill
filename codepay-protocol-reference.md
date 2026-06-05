@@ -57,7 +57,7 @@ Every request and response is one JSON object:
 | `topic` | M | which operation (table below) |
 | `request_id` | C | **unique per request; required for terminal confirmation mode.** This is the idempotency / recovery anchor. |
 | `app_id` | M | your payment app id (from CodePay onboarding) |
-| `timestamp` | M | epoch millis as string |
+| `timestamp` | O | epoch millis as string (live `api-structure` marks it Optional; SDKs still set it) |
 | `version` | O | protocol version, e.g. `"2.0"` |
 | `biz_data` | M | the transaction payload |
 
@@ -158,6 +158,11 @@ Reconcile/settle with `ecrhub.pay.batch.close` at end-of-day / shift close.
 | **POS-entered** | POS adds tip first, sends sale+tip total (and/or `tip_amount`) | cashier-entered |
 | **Post-auth adjustment** (`ecrhub.pay.tip.adjustment`) | authorize first, add tip later before settlement | bar tabs / sit-down + signature line |
 
+> The on-terminal Intent docs name the tip-adjust amount field **`tip_adjustment_amoun`**
+> — that is the spelling the official doc uses (a typo, missing the trailing `t`).
+> Verify against the SDK build you target before relying on it; send what the device
+> actually parses.
+
 ---
 
 ## PCI scope
@@ -197,7 +202,31 @@ SDKs / demos (read these for exact classes, fields, and enums):
 - Cross-terminal demo (Java) — https://github.com/codepay-us/codepay-register-cross-terminal-integration-demo-java
 - Orgs — https://github.com/codepay-us · https://github.com/paycloud-open
 
-### Android SDK call shape (topology B, reference)
+### Local WebSocket connection (topology B) — port + current SDK shape
+
+Verified against live `local-communication` docs (2026-06-04):
+
+- **WebSocket endpoint: `ws://<terminal-ip>:35779`** (fixed port **35779**).
+- Enable on the terminal: **Settings > General > ECR Hub > WLAN/LAN** — the screen
+  then shows the terminal's IP + port.
+- **For non-Android POS (Flutter on tablet/Windows/iOS), do NOT use the Android SDK.
+  Speak the ECR Hub JSON envelope directly over a raw WebSocket to that URL.** Send
+  `{topic, request_id, app_id, timestamp, version, biz_data}`; match the response by
+  `request_id`.
+
+**Two SDK generations exist — current docs use `ECRHubClient`; older GitHub README uses
+`EcrClient`.** Current shape (live docs):
+
+```kotlin
+val mClient = ECRHubClient.getInstance()
+mClient.init(config, context)
+mClient.connect("ws://192.168.100.2:35779")   // disconnect() to close
+// operations grouped under mClient.payment:
+mClient.payment.sale(params, callback)          // refund / cancel / query / tipAdjustment / batchClose
+// callback = ECRHubResponseCallBack { onSuccess(data); onError(code, msg) }
+```
+
+Older `EcrClient` shape (GitHub `ecrhub-client-sdk-android` README — kept for reference):
 
 ```kotlin
 val client = EcrClient.getInstance()
