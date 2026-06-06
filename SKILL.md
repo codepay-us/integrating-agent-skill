@@ -158,14 +158,15 @@ doc/SDK links: **`codepay-protocol-reference.md`**.
 | Putting integer cents on the wire | `order_amount` is a decimal string in major units. |
 | Hand-rolling lookup-by-idempotency-key recovery | Use CodePay's native `request_id` + `ecrhub.pay.query` keyed by `merchant_order_no`. |
 | Treating "no response" as "not charged" | It's UNKNOWN. Query before deciding; auto-void only unknown sales. |
-| Querying (recovery) on every failed sale | Recover ONLY on a genuine UNKNOWN: the request threw (timeout/lost response) OR a non-success `response_msg` mentions a timeout. Real declines (insufficient funds, M009) never query. |
-| Spawning a 2nd overlay for the recovery query — OR dropping the overlay before it | Keep ONE "follow prompts" overlay up across sale → recovery → final result; dismiss only at the end. A second popup confuses; dropping it lets the cashier touch the POS while the money state is unresolved. Keep sale and recovery as separate calls, both under the one overlay. |
-| `jsonDecode`-ing the `biz_data` extra blindly | A cancel (and other responses) return `biz_data` as an EMPTY string; `jsonDecode("")` throws → caught upstream as `unknown` → an unwanted query. Guard empty/malformed → empty map. (On-terminal cancel = `RESULT_OK` + `response_code "110"` "Manual cancelation", empty biz_data — read as a clean decline.) |
+| Querying (recovery) on every failed sale | Recover ONLY on a genuine UNKNOWN, never on real declines/cancels. See reference → *When to recover*. |
+| A 2nd overlay for recovery — or dropping it early | Keep ONE "follow prompts" overlay across sale → recovery → final result. See reference → *One continuous overlay*. |
+| `jsonDecode`-ing `biz_data` blindly | Cancel/others return an EMPTY `biz_data` → `jsonDecode("")` throws → false `unknown`. Guard empty/malformed → empty map. See reference. |
 | Modeling only one deployment | If both on-terminal and external are needed, the transport must be pluggable from day one. |
 | Only terminal-prompt tips | Bars/sit-down need post-auth `tip.adjustment`; cashiers need POS-entered. |
 | Routing the terminal call through the data/web-server layer | It's device I/O — place it with other device integrations; persist the *result* normally. |
 | Storing full PAN | Store masked last4 + brand only. Never PAN/track/CVV. |
-| Topology-B WebSocket hangs forever on iOS/macOS | The terminal's WS server returns a non-standard `101 Web Socket Protocol Handshake` reason phrase; Apple's `URLSessionWebSocketTask` rejects it silently. Hand-roll RFC-6455 over `NWConnection` (or use a lenient lib). See reference. |
+| Topology-B WebSocket hangs forever on iOS/macOS | Terminal's non-standard `101` reason phrase; Apple's `URLSessionWebSocketTask` hangs silently. Hand-roll RFC-6455 over `NWConnection`. See reference. |
+| LEAKING WebSocket connections (topology B) | Un-closed sockets (not connecting) slow the terminal. One socket per transaction, ALWAYS closed in `finally`. See reference → *Socket lifecycle*. |
 
 ## Red flags — STOP
 

@@ -277,6 +277,24 @@ Verified against live `local-communication` docs (2026-06-04):
   Speak the ECR Hub JSON envelope directly over a raw WebSocket to that URL.** Send
   `{topic, request_id, app_id, timestamp, version, biz_data}`; match the response by
   `request_id`.
+- **Socket lifecycle — the thing to avoid is LEAKING connections (opening
+  without closing), not connecting itself.** What slows the terminal's WS server
+  is accumulating un-closed sockets, not the connect cost.
+  - **Default (recommended for card payments): one socket per transaction,
+    ALWAYS closed in a `finally`.** Card transactions are infrequent and long
+    (1–2 min), so the per-connect cost (~tens of ms) is negligible, and a
+    short-lived socket leaves nothing lingering on the terminal and avoids
+    long-lived-connection edge cases. On that dedicated socket, accept the first
+    `response_code` frame (or one echoing `request_id`) as the result.
+  - **Only if transactions are HIGH-FREQUENCY and reconnect cost is measurable:**
+    reuse one persistent socket per URL — but then you MUST add a keep-alive ping
+    + lazy reconnect on drop, and match the response **STRICTLY by `request_id`**
+    (the terminal echoes it) so a stale frame from a previous transaction on the
+    shared socket can't be taken as the current result.
+
+  Either way: **guarantee the socket is closed on every path** (success,
+  decline, timeout, error) — that, not avoiding connects, is what prevents the
+  slowdown.
 
 > **⚠️ Non-standard `101` handshake — silently breaks strict WebSocket clients
 > (verified on real hardware 2026-06-04).** The terminal's WS server is
@@ -309,30 +327,11 @@ mClient.payment.sale(params, callback)          // refund / cancel / query / tip
 // callback = ECRHubResponseCallBack { onSuccess(data); onError(code, msg) }
 ```
 
-Older `EcrClient` shape (GitHub `ecrhub-client-sdk-android` README — kept for reference):
-
-```kotlin
-val client = EcrClient.getInstance()
-client.init(context, connectListener)
-client.connectWifi(terminalIp)          // discover/pair via EcrWifiDiscoveryService
-
-val params = PaymentRequestParams().apply {
-  app_id = "your_app_id"
-  topic = Constants.PAYMENT_TOPIC        // ecrhub.pay.order
-  timestamp = System.currentTimeMillis().toString()
-  biz_data = PaymentRequestParams.BizData().apply {
-    trans_type = Constants.TRANS_TYPE_SALE   // 1
-    order_amount = "1.00"                     // decimal string!
-    merchant_order_no = uniqueRef
-    pay_scenario = "SWIPE_CARD"
-    isConfirm_on_terminal = false
-  }
-}
-client.doTransaction(JSON.toJSONString(params), responseCallback)
-// recovery:
-client.queryTransaction(/* topic = QUERY_TOPIC, biz_data.merchant_order_no = ref */)
-client.cancelTransaction(/* topic = CLOSE_TOPIC */)
-```
+Older `EcrClient` SDK generation (GitHub `ecrhub-client-sdk-android` README — legacy):
+`EcrClient.getInstance().init / connectWifi / doTransaction / queryTransaction /
+cancelTransaction`, wrapping the same `biz_data` fields in `PaymentRequestParams`
+(`trans_type`, decimal-string `order_amount`, `merchant_order_no`, `pay_scenario`,
+`isConfirm_on_terminal`). Use only if you must support the legacy SDK — full shape in the repo.
 
 ### Android on-terminal Intent shape (topology A, reference)
 
